@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-relay
+  namespace: agent-relay
+spec:
+  # A Deployment is what keeps this replica count running and rolls out updates.
+  replicas: 2
+  selector:
+    matchLabels:
+      app: agent-relay
+  template:
+    metadata:
+      labels:
+        app: agent-relay
+    spec:
+      containers:
+        - name: api
+          image: agent-relay:local
+          # kind loads images into the node, so never try to pull from a registry.
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: RELAY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: relay-db
+                  key: RELAY_DATABASE_URL
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent-relay
+  namespace: agent-relay
+spec:
+  selector:
+    app: agent-relay
+  ports:
+    - port: 8000
+      targetPort: 8000

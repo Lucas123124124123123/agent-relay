@@ -134,6 +134,15 @@ def _is_sqlite(url: str) -> bool:
     return url.startswith("sqlite")
 
 
+def _is_postgres(url: str) -> bool:
+    return url.startswith("postgresql") or url.startswith("postgres://")
+
+
+# One fixed key for the transaction-scoped advisory lock that replaces SQLite's
+# BEGIN IMMEDIATE writer reservation on PostgreSQL.
+_WRITER_LOCK_KEY = 8527301449112
+
+
 engine_kwargs: dict[str, Any] = {"future": True, "pool_pre_ping": True}
 if _is_sqlite(DATABASE_URL):
     engine_kwargs.update({"connect_args": {"check_same_thread": False, "timeout": 30}})
@@ -177,19 +186,22 @@ def db_session() -> Generator[Session, None, None]:
 
 @contextmanager
 def immediate_transaction() -> Generator[Session, None, None]:
-    """Run one SQLite writer transaction before selecting or changing work.
+    """Run one writer transaction before selecting or changing work.
 
-    SQLite does not support PostgreSQL's ``FOR UPDATE SKIP LOCKED``.  A
-    ``BEGIN IMMEDIATE`` writer reservation serializes claims (and recovery or
-    terminal submissions) across API processes, giving each task one active
-    lease.  This is the intentionally isolated seam for a future PostgreSQL
-    implementation.
+    On SQLite a ``BEGIN IMMEDIATE`` writer reservation serializes claims (and
+    recovery or terminal submissions) across API processes, giving each task
+    one active lease.  PostgreSQL has no ``BEGIN IMMEDIATE``; the equivalent
+    guarantee comes from a transaction-scoped advisory lock, which serializes
+    the same writers and is released automatically on commit or rollback.
     """
 
     connection = engine.connect()
     session = Session(bind=connection, expire_on_commit=False, autoflush=True)
     try:
-        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        if _is_sqlite(DATABASE_URL):
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+        elif _is_postgres(DATABASE_URL):
+            connection.exec_driver_sql(f"SELECT pg_advisory_xact_lock({_WRITER_LOCK_KEY})")
         yield session
         session.flush()
         connection.commit()
