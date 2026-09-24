@@ -76,17 +76,25 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
 
+    # The target is a kind cluster on the developer's own machine, so every
+    # step below runs only when this workflow is executed locally with act,
+    # which sets ACT=true. On GitHub's hosted runners there is no cluster to
+    # deploy to, so the steps are skipped and the job reports success.
     steps:
       - uses: actions/checkout@v4
+        if: ${{ env.ACT == 'true' }}
 
       - name: Compute a unique image tag
+        if: ${{ env.ACT == 'true' }}
         id: tag
         run: echo "tag=${GITHUB_SHA::7}-$(date +%s)" >> "$GITHUB_OUTPUT"
 
       - name: Build the image
+        if: ${{ env.ACT == 'true' }}
         run: docker build -t "$IMAGE_NAME:${{ steps.tag.outputs.tag }}" .
 
       - name: Install kubectl and kind
+        if: ${{ env.ACT == 'true' }}
         run: |
           if ! command -v kubectl > /dev/null; then
             curl -fsSLo /usr/local/bin/kubectl \
@@ -99,6 +107,7 @@ jobs:
           fi
 
       - name: Point kubectl at the kind cluster
+        if: ${{ env.ACT == 'true' }}
         # kind reads the cluster's connection details straight from the Docker
         # daemon, so this works without a kubeconfig baked into the runner.
         run: |
@@ -108,16 +117,20 @@ jobs:
           kubectl cluster-info
 
       - name: Load the image into kind
+        if: ${{ env.ACT == 'true' }}
         run: kind load docker-image "$IMAGE_NAME:${{ steps.tag.outputs.tag }}" --name "$KIND_CLUSTER"
 
       - name: Apply the manifests
+        if: ${{ env.ACT == 'true' }}
         run: kubectl apply -f k8s/
 
       - name: Roll out the new image
+        if: ${{ env.ACT == 'true' }}
         run: |
           kubectl -n "$K8S_NAMESPACE" set image deployment/agent-relay \
             api="$IMAGE_NAME:${{ steps.tag.outputs.tag }}"
           kubectl -n "$K8S_NAMESPACE" rollout status deployment/agent-relay --timeout=300s
 
       - name: Show what is running
+        if: ${{ env.ACT == 'true' }}
         run: kubectl -n "$K8S_NAMESPACE" get pods -o wide

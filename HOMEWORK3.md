@@ -82,6 +82,13 @@ The host used for this work already had port 8000 taken by another project, so
 Compose publishes `8080:8000` and the CI job runs the API on 8001. Neither
 changes the container's own port, which stays 8000.
 
+The deployment target is a kind cluster on the developer's own machine, so the
+`deploy` job's steps are guarded by `env.ACT == 'true'` and only run when the
+workflow is executed locally with `act`. On GitHub's hosted runners there is no
+cluster to reach, so those steps are skipped and the job reports success. The
+gate is on the steps rather than the job because `jobs.<id>.if` cannot read the
+`env` context.
+
 ## Answers
 
 1. Agents claim tasks from a DB through an HTTP API
